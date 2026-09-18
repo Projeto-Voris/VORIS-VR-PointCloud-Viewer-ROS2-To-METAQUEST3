@@ -1,43 +1,44 @@
-
 using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
-using OdometryMsg = RosMessageTypes.Nav.OdometryMsg;
+using Unity.Robotics.ROSTCPConnector.ROSGeometry; // Importação necessária para a conversão de eixos
+using PoseStampedMsg = RosMessageTypes.Geometry.PoseStampedMsg;
 
 public class OdomReceiver : MonoBehaviour
 {
     ROSConnection ros;
-    
-    // Deixamos público para você poder trocar o nome do tópico direto na Unity
-    public string topicName = "/run_slam/camera_pose"; 
+    public string topicName = "/mavros/local_position/pose_unity";
+
+    private Vector3 targetPosition;
+    private Quaternion targetRotation;
+    private bool hasNewData = false;
+    private int messageCount = 0;
 
     void Start()
     {
-        // Pega a conexão com a Jetson e assina o tópico
         ros = ROSConnection.GetOrCreateInstance();
-        ros.Subscribe<OdometryMsg>(topicName, ReceiveOdometry);
+        ros.Subscribe<PoseStampedMsg>(topicName, ReceivePose);
     }
 
-    void ReceiveOdometry(OdometryMsg msg)
+    void ReceivePose(PoseStampedMsg msg)
     {
-        // --- 1. POSIÇÃO (X, Y, Z) ---
-        float posX = (float)msg.pose.pose.position.x;
-        float posY = (float)msg.pose.pose.position.y;
-        float posZ = (float)msg.pose.pose.position.z;
-        
-        Vector3 unityPosition = new Vector3(-posY, posZ, posX);
-        transform.position = unityPosition;
+        // O .From<FLU>() converte automaticamente a posição e orientação do padrão ROS para o da Unity
+        targetPosition = msg.pose.position.From<FLU>();
+        targetRotation = msg.pose.orientation.From<FLU>();
 
-        // --- 2. ORIENTAÇÃO / ROTAÇÃO (QUATERNION) ---
-        float rotX = (float)msg.pose.pose.orientation.x;
-        float rotY = (float)msg.pose.pose.orientation.y;
-        float rotZ = (float)msg.pose.pose.orientation.z;
-        float rotW = (float)msg.pose.pose.orientation.w;
-        
-        // Espião: Imprime no console os valores brutos de rotação chegando do ROS
-        Debug.Log($"Rotação ROS -> X: {rotX:F3} | Y: {rotY:F3} | Z: {rotZ:F3} | W: {rotW:F3}");
+        messageCount++;
+        hasNewData = true;
+    }
 
-        // Conversão Padrão de eixos de rotação: ROS para Unity
-        Quaternion unityRotation = new Quaternion(rotY, -rotZ, -rotX, rotW);
-        transform.rotation = unityRotation;
+    void Update()
+    {
+        if (!hasNewData) return;
+
+        // Aplica posição local para respeitar a hierarquia da cena
+        transform.localPosition = targetPosition;
+        transform.localRotation = targetRotation;
+
+        Debug.Log($"[Msg #{messageCount}] Pose ROS aplicada nativamente.");
+
+        hasNewData = false;
     }
 }
